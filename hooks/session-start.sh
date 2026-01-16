@@ -39,7 +39,7 @@ find_group_id() {
     fi
     # Check CLAUDE.md für graphiti_group_id
     if [ -f "$dir/CLAUDE.md" ]; then
-      local group_id=$(grep -o 'graphiti_group_id:\s*\S*' "$dir/CLAUDE.md" | head -1 | sed 's/graphiti_group_id:\s*//')
+      local group_id=$(grep 'graphiti_group_id:' "$dir/CLAUDE.md" | head -1 | sed 's/.*graphiti_group_id:[[:space:]]*//' | tr -d '[:space:]')
       if [ -n "$group_id" ]; then
         echo "$group_id"
         return 0
