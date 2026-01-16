@@ -86,6 +86,10 @@ if [ -n "$cwd" ]; then
 fi
 
 if [ -n "$project_name" ] && [ "$group_id" != "main" ]; then
+  # Terminal-Output (sichtbar für User)
+  echo "🧠 Graphiti: $project_name → $group_id" >&2
+
+  # Context für Claude (stdout)
   cat <<EOF
 ## Graphiti Knowledge System
 
@@ -104,7 +108,10 @@ if [ -n "$project_name" ] && [ "$group_id" != "main" ]; then
 - VOR Projektende: Learnings nach \`main\` promoten
 EOF
 elif [ -n "$cwd" ] && [ "$group_id" = "main" ]; then
-  # Warnung: Working Directory existiert aber keine Projekt-Config gefunden
+  # Terminal-Output (Warnung sichtbar für User)
+  echo "⚠️  Graphiti: Keine Projekt-Config → main (Warnung!)" >&2
+
+  # Context für Claude (stdout)
   cat <<EOF
 ## Graphiti Knowledge System
 
@@ -127,6 +134,10 @@ graphiti_group_id: mein-projektname
 **Ohne Konfiguration:** Alles wird in \`main\` gespeichert (NICHT empfohlen für Projekte!)
 EOF
 else
+  # Terminal-Output (sichtbar für User)
+  echo "🧠 Graphiti: main (persönlich)" >&2
+
+  # Context für Claude (stdout)
   cat <<'EOF'
 ## Graphiti Knowledge System
 
