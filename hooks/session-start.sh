@@ -1,26 +1,46 @@
 #!/bin/bash
 # Graphiti Knowledge System - SessionStart Hook
 # Zeigt Hinweis auf verfügbares Wissensmanagement bei neuem Session-Start
+#
+# Output Format (JSON):
+# - systemMessage: Wird dem USER angezeigt (Terminal)
+# - additionalContext: Wird Claude als Kontext gegeben
+#
 # Erkennt Projekt aus:
-# 1. .graphiti-group Datei im Projekt-Root
-# 2. CLAUDE.md mit graphiti_group_id
+# 1. CLAUDE.md mit graphiti_group_id
+# 2. GitHub Remote (owner/repo)
 # 3. Fallback: Git Root Projektname
 
 input=$(cat)
+
 source_type=$(echo "$input" | jq -r '.source // "startup"')
 
-# cwd aus JSON oder fallback zu $PWD (Hook läuft im aktuellen Verzeichnis)
+# cwd aus JSON oder fallback zu $PWD
 cwd=$(echo "$input" | jq -r '.cwd // ""')
 if [ -z "$cwd" ]; then
   cwd="$PWD"
 fi
 
-# Nur bei neuem Start, nicht bei Resume
+# Nur bei neuem Start (startup), nicht bei Resume
 if [ "$source_type" != "startup" ]; then
   exit 0
 fi
 
-# Funktion: Finde Git Root
+# === MCP Connectivity Check ===
+GRAPHITI_URL="https://graphiti.marakanda.biz/health"
+mcp_status="unknown"
+mcp_warning=""
+
+# Timeout 3s für Health-Check
+if curl -s --max-time 3 "$GRAPHITI_URL" | grep -q "healthy"; then
+  mcp_status="ok"
+else
+  mcp_status="error"
+  mcp_warning="Graphiti MCP nicht erreichbar! Wissen kann nicht gespeichert/abgerufen werden."
+fi
+
+# === Projekt-Erkennung ===
+
 find_git_root() {
   local dir="$1"
   while [ "$dir" != "/" ]; do
@@ -33,20 +53,37 @@ find_git_root() {
   return 1
 }
 
-# Funktion: Suche nach .graphiti-group oder CLAUDE.md
-find_group_id() {
+get_github_repo() {
+  local git_root="$1"
+  local remote_url=$(git -C "$git_root" remote get-url origin 2>/dev/null)
+
+  if [ -z "$remote_url" ]; then
+    return 1
+  fi
+
+  local repo=""
+  if [[ "$remote_url" == git@github.com:* ]]; then
+    repo="${remote_url#git@github.com:}"
+    repo="${repo%.git}"
+  elif [[ "$remote_url" == https://github.com/* ]]; then
+    repo="${remote_url#https://github.com/}"
+    repo="${repo%.git}"
+  fi
+
+  if [ -n "$repo" ]; then
+    echo "$repo"
+    return 0
+  fi
+  return 1
+}
+
+find_claude_md_group() {
   local dir="$1"
   while [ "$dir" != "/" ]; do
-    # Check .graphiti-group
-    if [ -f "$dir/.graphiti-group" ]; then
-      cat "$dir/.graphiti-group"
-      return 0
-    fi
-    # Check CLAUDE.md für graphiti_group_id
     if [ -f "$dir/CLAUDE.md" ]; then
-      local group_id=$(grep 'graphiti_group_id:' "$dir/CLAUDE.md" | head -1 | sed 's/.*graphiti_group_id:[[:space:]]*//' | tr -d '[:space:]')
-      if [ -n "$group_id" ]; then
-        echo "$group_id"
+      local gid=$(grep 'graphiti_group_id:' "$dir/CLAUDE.md" 2>/dev/null | head -1 | sed 's/.*graphiti_group_id:[[:space:]]*//' | tr -d '[:space:]')
+      if [ -n "$gid" ]; then
+        echo "$gid"
         return 0
       fi
     fi
@@ -58,100 +95,185 @@ find_group_id() {
 # Projekt-Erkennung
 project_name=""
 group_id="main"
+github_group_id=""
+claude_md_group_id=""
+source_type_display=""
 
 if [ -n "$cwd" ]; then
-  # 1. Check .graphiti-group oder CLAUDE.md
-  found_group=$(find_group_id "$cwd")
-  if [ -n "$found_group" ]; then
-    # Format kann sein: group_id oder group_id:name
-    if [[ "$found_group" == *":"* ]]; then
-      group_id="${found_group%%:*}"
-      project_name="${found_group#*:}"
-    else
-      group_id="$found_group"
-      # Projektname aus Git Root
-      git_root=$(find_git_root "$cwd")
-      if [ -n "$git_root" ]; then
-        project_name=$(basename "$git_root")
+  git_root=$(find_git_root "$cwd")
+
+  if [ -n "$git_root" ]; then
+    project_name=$(basename "$git_root")
+    github_group_id=$(get_github_repo "$git_root")
+    claude_md_group_id=$(find_claude_md_group "$cwd")
+
+    if [ -n "$claude_md_group_id" ]; then
+      group_id="$claude_md_group_id"
+      if [ -n "$github_group_id" ] && [ "$claude_md_group_id" != "$github_group_id" ]; then
+        source_type_display="claude-md-override"
+      else
+        source_type_display="claude-md"
       fi
+    elif [ -n "$github_group_id" ]; then
+      group_id="$github_group_id"
+      source_type_display="github"
+    else
+      group_id="project-$(echo "$project_name" | tr '[:upper:]' '[:lower:]')"
+      source_type_display="local-git"
     fi
   else
-    # 2. Fallback: Git Root + Projektname
-    git_root=$(find_git_root "$cwd")
-    if [ -n "$git_root" ]; then
-      project_name=$(basename "$git_root")
-      group_id="project-$(echo "$project_name" | tr '[:upper:]' '[:lower:]')"
+    claude_md_group_id=$(find_claude_md_group "$cwd")
+    if [ -n "$claude_md_group_id" ]; then
+      group_id="$claude_md_group_id"
+      source_type_display="claude-md-no-git"
+    else
+      source_type_display="none"
     fi
   fi
 fi
 
-if [ -n "$project_name" ] && [ "$group_id" != "main" ]; then
-  # Terminal-Output (sichtbar für User)
-  echo "🧠 Graphiti: $project_name → $group_id" >&2
+# === Output bauen ===
 
-  # Context für Claude (stdout)
-  cat <<EOF
-## Graphiti Knowledge System
+# systemMessage: Für den User sichtbar
+# additionalContext: Für Claude als Kontext
 
-**Projekt erkannt:** $project_name
+build_system_message() {
+  # Icons: ✅ OK | ⚠️ Warning | ❌ Error
+
+  # MCP unreachable = critical
+  if [ "$mcp_status" = "error" ]; then
+    echo "🧠 ❌ GRAPHITI OFFLINE - Knowledge unavailable!"
+    return
+  fi
+
+  # No project detected = warning
+  if [ "$source_type_display" = "none" ]; then
+    echo "🧠 ⚠️ Graphiti: no project → main memory"
+    return
+  fi
+
+  # CLAUDE.md override = warning
+  if [ "$source_type_display" = "claude-md-override" ]; then
+    echo "🧠 ⚠️ Graphiti: $group_id (CLAUDE.md overrides GitHub)"
+    return
+  fi
+
+  # Local git without GitHub = note
+  if [ "$source_type_display" = "local-git" ]; then
+    echo "🧠 ✅ Graphiti: $group_id (local)"
+    return
+  fi
+
+  # All OK
+  echo "🧠 ✅ Graphiti: $group_id"
+}
+
+build_context() {
+  local ctx=""
+
+  # MCP Status
+  if [ "$mcp_status" = "error" ]; then
+    ctx="## Graphiti Knowledge System
+
+**STATUS: UNREACHABLE**
+
+Graphiti MCP Server not responding at $GRAPHITI_URL
+
+**Possible causes:**
+- Docker container on Ubuntu VM down
+- Traefik reverse proxy issue
+- Network problem
+
+**Action:** Escalate to user immediately if Graphiti functions are needed.
+Do NOT use WebSearch as substitute for personal knowledge."
+    echo "$ctx"
+    return
+  fi
+
+  # Project context
+  case "$source_type_display" in
+    "github"|"claude-md")
+      ctx="## Graphiti Knowledge System
+
+**Project:** $project_name
 **group_id:** \`$group_id\`
 
-### Wichtig für dieses Projekt:
+**Search:** \`graphiti__search_nodes(query, group_ids=[\"main\", \"$group_id\"])\`
+**Save project-specific:** \`graphiti__add_memory(..., group_id=\"$group_id\")\`
+**Save cross-project:** \`graphiti__add_memory(..., group_id=\"main\")\`"
+      ;;
+    "claude-md-override")
+      ctx="## Graphiti Knowledge System
 
-**Suche:** \`graphiti__search_nodes(query, group_ids=["main", "$group_id"])\`
-**Speichern Projekt:** \`graphiti__add_memory(..., group_id="$group_id")\`
-**Speichern Übergreifend:** \`graphiti__add_memory(..., group_id="main")\`
+**CLAUDE.md overrides GitHub!**
 
-### Regeln:
-- Projektspezifisches Wissen (Requirements, Architektur) → \`$group_id\`
-- Übergreifende Learnings, Decisions → \`main\`
-- VOR Projektende: Learnings nach \`main\` promoten
-EOF
-elif [ -n "$cwd" ] && [ "$group_id" = "main" ]; then
-  # Terminal-Output (Warnung sichtbar für User)
-  echo "⚠️  Graphiti: Keine Projekt-Config → main (Warnung!)" >&2
+**Project:** $project_name
+**group_id:** \`$group_id\` (from CLAUDE.md)
+**GitHub would be:** \`$github_group_id\`
 
-  # Context für Claude (stdout)
-  cat <<EOF
-## Graphiti Knowledge System
+**Search:** \`graphiti__search_nodes(query, group_ids=[\"main\", \"$group_id\"])\`
+**Save:** \`graphiti__add_memory(..., group_id=\"$group_id\")\`"
+      ;;
+    "local-git")
+      ctx="## Graphiti Knowledge System
 
-⚠️ **WARNUNG: Keine Projekt-Konfiguration gefunden!**
+**Local Git (no GitHub remote)**
 
-Working Directory: \`$cwd\`
-Fallback group_id: \`main\` (persönliches Wissen)
+**Project:** $project_name
+**group_id:** \`$group_id\`
 
-**Wenn dies ein Projekt ist:**
-Erstelle \`.graphiti-group\` im Projekt-Root mit deinem group_id Namen:
-\`\`\`
-echo "mein-projektname" > .graphiti-group
-\`\`\`
+**Recommendation:** Push to GitHub for stable group_id, or set \`graphiti_group_id:\` in CLAUDE.md.
 
-Oder füge in CLAUDE.md hinzu:
-\`\`\`
-graphiti_group_id: mein-projektname
-\`\`\`
+**Search:** \`graphiti__search_nodes(query, group_ids=[\"main\", \"$group_id\"])\`
+**Save:** \`graphiti__add_memory(..., group_id=\"$group_id\")\`"
+      ;;
+    "claude-md-no-git")
+      ctx="## Graphiti Knowledge System
 
-**Ohne Konfiguration:** Alles wird in \`main\` gespeichert (NICHT empfohlen für Projekte!)
-EOF
-else
-  # Terminal-Output (sichtbar für User)
-  echo "🧠 Graphiti: main (persönlich)" >&2
+**group_id:** \`$group_id\` (from CLAUDE.md, no Git)
 
-  # Context für Claude (stdout)
-  cat <<'EOF'
-## Graphiti Knowledge System
+**Search:** \`graphiti__search_nodes(query, group_ids=[\"main\", \"$group_id\"])\`
+**Save:** \`graphiti__add_memory(..., group_id=\"$group_id\")\`"
+      ;;
+    "none")
+      ctx="## Graphiti Knowledge System
 
-Persönliches Wissensmanagement ist verfügbar (group_id: `main`).
+**No project detected!**
 
-**Recherche ERST:**
-- Bei Fragen über Personen, Firmen, Projekte → `graphiti__search_nodes()` ZUERST
-- NIEMALS raten oder erfinden wenn Graphiti nichts findet
+**Directory:** \`$cwd\`
+**Fallback:** main memory
 
-**Speichern IMMER:**
-- Neue Fakten, Erkenntnisse, Entscheidungen → `graphiti__add_memory()`
+⚠️ EVERYTHING goes to main memory! For projects:
+- Create Git repository with GitHub remote, OR
+- Set \`graphiti_group_id: my-project\` in CLAUDE.md
 
-**Entity Types:** Person, Organization, Project, Event, Concept, Learning, Decision, Preference, Goal, Location, Document, Requirement, Procedure, Topic, Object
-EOF
-fi
+**Search:** \`graphiti__search_nodes(query)\`
+**Save:** \`graphiti__add_memory()\`"
+      ;;
+    *)
+      ctx="## Graphiti Knowledge System
+
+**Mode:** main memory
+
+**Search:** \`graphiti__search_nodes(query)\`
+**Save:** \`graphiti__add_memory()\`"
+      ;;
+  esac
+
+  echo "$ctx"
+}
+
+system_message=$(build_system_message)
+additional_context=$(build_context)
+
+# JSON Output - systemMessage wird dem User angezeigt!
+jq -n \
+  --arg sm "$system_message" \
+  --arg ctx "$additional_context" \
+  '{
+    "hookSpecificOutput": { "hookEventName": "SessionStart" },
+    "systemMessage": $sm,
+    "additionalContext": $ctx
+  }'
 
 exit 0

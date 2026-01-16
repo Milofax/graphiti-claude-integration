@@ -1,8 +1,18 @@
 #PITH:1.2
 #MCP:graphiti|stand:2026-01
 
+!!verfügbarkeit:Graphiti-Tools MÜSSEN verfügbar sein
+  |prüfen:discover_tools_by_words("graphiti")→0 Treffer=SOFORT ESKALIEREN
+  |verstoß:Still weiterarbeiten ohne Graphiti→User merkt zu spät→Session kompromittiert
+  |eskalation:"⚠️ Graphiti MCP nicht erreichbar! Kann kein Wissen speichern/abrufen."
+  |ursachen:Container down|Traefik kaputt|mcp-funnel Cache stale→Docker restart auf VM
+
+!!erst:Bei Fragen über Personen/Firmen/Projekte→IMMER graphiti__search_nodes() ZUERST
+  |verstoß:Raten/Erfinden ohne Recherche→User bekommt falsche Info→Vertrauen zerstört
+  |trigger:"wer ist"|"kennst du"|"was weißt du über"|Person/Firma/Projekt erwähnt
+  |warnsignal:Antwort ohne search_nodes()=STOP→erst recherchieren
+
 !zuständig:Persönliches Wissen|Kontakte,Firmen,Projekte|Entscheidungen,Präferenzen|Session-übergreifendes Gedächtnis
-!erst:Bei Fragen über Personen/Firmen/Projekte→IMMER graphiti__search_nodes() ZUERST|Verstoß=Raten/Erfinden ohne Recherche
 !nicht_zuständig:Allgemeines Weltwissen|Aktuelle News|Code-Dokumentation(→Context7)
 !aktivierung:discover_tools_by_words("graphiti",enable=true)
 
@@ -51,7 +61,12 @@ Topic≠Concept:Topic=Kategorie/Feld|Concept=konkretes Wissen/Framework
 !recherche:Fakt aus Recherche→mit Quelle speichern|source:"[URL/Buch/Artikel]"
 !unsicher:Bei Unsicherheit→ERST fragen:"Soll ich speichern: [Fakt]? Quelle: [X]"|Verstoß=Still speichern
 !nie:Annahmen als Fakten|Gerüchte|Unbestätigtes|Allgemeinwissen(gehört nicht in persönliches Wissen)
-!nie_credentials:NIEMALS Passwörter,API-Keys,Tokens,PINs,Kreditkarten speichern|→gehören in 1Password|Verstoß=Credentials in Graphiti
+
+!!nie_credentials:NIEMALS Passwörter,API-Keys,Tokens,PINs,Kreditkarten speichern
+  |verstoß:Credentials in Graphiti→Security-Breach→User kompromittiert→3-Strikes→Session BLOCKIERT
+  |gehört_nach:1Password(immer)|Secrets Manager|Environment Variables
+  |trigger:add_memory mit "password"|"api_key"|"token"|"secret"|"pin"|"credentials"=STOP
+  |warnsignal:User erwähnt Credentials→"Das gehört in 1Password, nicht in Graphiti"
 
 ## workflow
 speichern:add_memory(name,episode_body,source_description)→automatische Entity-Extraktion
