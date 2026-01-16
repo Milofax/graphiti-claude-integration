@@ -8,7 +8,12 @@
 
 input=$(cat)
 source_type=$(echo "$input" | jq -r '.source // "startup"')
+
+# cwd aus JSON oder fallback zu $PWD (Hook läuft im aktuellen Verzeichnis)
 cwd=$(echo "$input" | jq -r '.cwd // ""')
+if [ -z "$cwd" ]; then
+  cwd="$PWD"
+fi
 
 # Nur bei neuem Start, nicht bei Resume
 if [ "$source_type" != "startup" ]; then
