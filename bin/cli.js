@@ -75,6 +75,15 @@ function ensureDir(dir) {
 
 function copyFile(source, dest) {
   try {
+    // Remove existing file/symlink first (fs.copyFileSync follows symlinks!)
+    if (fs.existsSync(dest) || fs.lstatSync(dest).isSymbolicLink()) {
+      fs.unlinkSync(dest);
+    }
+  } catch (e) {
+    // File doesn't exist, that's fine
+  }
+
+  try {
     fs.copyFileSync(source, dest);
     if (dest.endsWith('.py')) {
       fs.chmodSync(dest, 0o755);
