@@ -1,177 +1,68 @@
 #!/usr/bin/env python3
-"""
-Graphiti Guard Hook - Enforces 9 !! rules from graphiti.md
-
-Rules enforced:
-- !!quelle_pflicht: source_description IMMER angeben
-- !!nie_credentials: NIEMALS Passwörter/API-Keys speichern
-- !!vor_add_memory: group_id ENTSCHEIDEN
-- !!review: VOR clear_graph reviewen
-- !!promoten: Vor clear_graph promoten
-
-Triggers:
-- mcp__mcp-funnel__bridge_tool_request (graphiti tools)
-"""
-
-import json
-import sys
-import os
-
-# Add lib directory to path for session_state import
-# Path is relative to this hook's location: ../lib/ (same package)
+import json, sys, os, hashlib
 HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
-LIB_DIR = os.path.join(HOOK_DIR, '..', 'lib')
-sys.path.insert(0, LIB_DIR)
-
+sys.path.insert(0, os.path.join(HOOK_DIR, '..', 'lib'))
 from session_state import register_hook, read_state, write_state
 
+CRED_PATTERNS = ["password","api_key","api-key","apikey","token","secret","pin","credentials","private_key","private-key","privatekey","access_token","access-token","accesstoken","auth_token","auth-token","authtoken"]
 
-# Credential patterns to block
-CREDENTIAL_PATTERNS = [
-    "password",
-    "api_key",
-    "api-key",
-    "apikey",
-    "token",
-    "secret",
-    "pin",
-    "credentials",
-    "private_key",
-    "private-key",
-    "privatekey",
-    "access_token",
-    "access-token",
-    "accesstoken",
-    "auth_token",
-    "auth-token",
-    "authtoken",
-]
-
-
-def contains_credentials(text: str) -> bool:
-    """Check if text contains credential patterns."""
-    text_lower = text.lower()
-    return any(pattern in text_lower for pattern in CREDENTIAL_PATTERNS)
-
+def has_creds(text): return any(p in text.lower() for p in CRED_PATTERNS)
+def chash(text): return hashlib.md5(text.encode()).hexdigest()[:8]
 
 def main():
-    try:
-        hook_input = json.load(sys.stdin)
-    except json.JSONDecodeError:
-        # Invalid input, allow
-        print(json.dumps({"decision": "approve"}))
-        return
-
-    # Register this hook
+    try: hook_input = json.load(sys.stdin)
+    except: print(json.dumps({"decision":"approve"})); return
     register_hook("graphiti")
-
-    tool_name = hook_input.get("tool_name", "")
-    tool_input = hook_input.get("tool_input", {})
-
-    # Only handle Graphiti MCP tools
+    tool_name = hook_input.get("tool_name","")
+    tool_input = hook_input.get("tool_input",{})
     if tool_name != "mcp__mcp-funnel__bridge_tool_request":
-        print(json.dumps({"decision": "approve"}))
-        return
-
-    bridge_tool = tool_input.get("tool", "")
+        print(json.dumps({"decision":"approve"})); return
+    bridge_tool = tool_input.get("tool","")
     if "graphiti" not in bridge_tool.lower():
-        print(json.dumps({"decision": "approve"}))
-        return
+        print(json.dumps({"decision":"approve"})); return
+    args = tool_input.get("arguments",{})
 
-    arguments = tool_input.get("arguments", {})
-
-    # Handle add_memory
     if "add_memory" in bridge_tool.lower():
-        # !!quelle_pflicht: source_description required
-        source_description = arguments.get("source_description", "")
-        if not source_description or source_description.strip() == "":
-            print(json.dumps({
-                "decision": "block",
-                "reason": (
-                    "!!quelle_pflicht: source_description fehlt!\n\n"
-                    "Woher kommt dieses Wissen?\n"
-                    "- User-Aussage → source_description: 'User-Aussage 2026-01-17'\n"
-                    "- Recherche → source_description: '[URL oder Buch]'\n"
-                    "- Eigene Erkenntnis → source_description: 'Eigene Erfahrung'\n\n"
-                    "Wissen ohne Quelle kontaminiert den Graph!"
-                )
-            }))
+        src = args.get("source_description","")
+        if not src or not src.strip():
+            print(json.dumps({"decision":"block","reason":"!!quelle_pflicht: source_description fehlt!\n→User-Aussage|Recherche[URL]|Eigene Erfahrung"}))
             return
-
-        # !!nie_credentials: No credentials in episode_body
-        episode_body = arguments.get("episode_body", "")
-        if contains_credentials(episode_body):
-            print(json.dumps({
-                "decision": "block",
-                "reason": (
-                    "!!nie_credentials: Credentials erkannt!\n\n"
-                    "episode_body enthält sensible Daten (password, api_key, token, etc.)\n\n"
-                    "Credentials gehören in:\n"
-                    "- 1Password (immer)\n"
-                    "- Secrets Manager\n"
-                    "- Environment Variables\n\n"
-                    "NIEMALS in Graphiti speichern!"
-                )
-            }))
+        body = args.get("episode_body","")
+        if has_creds(body):
+            print(json.dumps({"decision":"block","reason":"!!nie_credentials: Sensible Daten erkannt!\n→1Password|Secrets Manager|Env Vars\nNIE in Graphiti!"}))
             return
-
-        # !!vor_add_memory: Warn if group_id not explicit
-        group_id = arguments.get("group_id", "")
-        if not group_id or group_id.strip() == "":
-            # Allow but warn
-            print(json.dumps({
-                "decision": "approve",
-                "message": (
-                    "!!vor_add_memory: group_id nicht explizit angegeben.\n"
-                    "Default ist 'main' - ist das korrekt?\n\n"
-                    "- main = Langfristiges Wissen (Kontakte, Learnings, Decisions)\n"
-                    "- project-* = Kontextgebundenes Wissen (Requirements, Procedures)\n\n"
-                    "Falsches group_id → Kontamination → manuelles Cleanup nötig!"
-                )
-            }))
+        gid = args.get("group_id","")
+        name = args.get("name","")
+        eff_gid = gid.strip() if gid else "main"
+        if eff_gid == "main":
+            state = read_state()
+            pending = state.get("main_pending",{})
+            curr_hash = chash(body)
+            if pending.get("name") == name:
+                write_state("main_pending",{})
+                if pending.get("content_hash") == curr_hash:
+                    print(json.dumps({"decision":"approve","message":"⚠️ Content unverändert→Abstraktion empfohlen!"}))
+                else:
+                    print(json.dumps({"decision":"approve"}))
+                return
+            write_state("main_pending",{"name":name,"content_hash":curr_hash})
+            print(json.dumps({"decision":"block","reason":"!!main_bestätigung: Speichern in 'main' (permanent).\n1.ÜBERTRAGBAR?\n2.ABSTRAKTION(nicht Impl)?\n3.In 5 Jahren relevant?\nNEIN→projekt-spezifisch|JA→wiederholen"}))
             return
+        print(json.dumps({"decision":"approve"})); return
 
-        # add_memory with all checks passed
-        print(json.dumps({"decision": "approve"}))
-        return
-
-    # Handle clear_graph
     if "clear_graph" in bridge_tool.lower():
-        state = read_state()
-
-        # !!review + !!promoten: Must review before clearing
-        if not state.get("graphiti_review_done", False):
-            print(json.dumps({
-                "decision": "block",
-                "reason": (
-                    "!!review: Erst Learnings/Decisions reviewen!\n\n"
-                    "VOR clear_graph IMMER:\n"
-                    "1. search_nodes(entity_types=['Learning', 'Decision', 'Concept'])\n"
-                    "2. Wertvolles Wissen nach 'main' promoten\n"
-                    "3. DANN clear_graph\n\n"
-                    "Nach clear_graph ist Kontext-Wissen WEG - irreversibel!"
-                )
-            }))
+        if not read_state().get("graphiti_review_done",False):
+            print(json.dumps({"decision":"block","reason":"!!review: Erst search_nodes(entity_types=['Learning','Decision','Concept'])→promoten→DANN clear_graph"}))
             return
+        print(json.dumps({"decision":"approve"})); return
 
-        print(json.dumps({"decision": "approve"}))
-        return
-
-    # Handle search_nodes - track for clear_graph review
     if "search_nodes" in bridge_tool.lower():
-        entity_types = arguments.get("entity_types", [])
-        entity_types_str = str(entity_types).lower()
+        et = str(args.get("entity_types",[])).lower()
+        if "learning" in et or "decision" in et or "concept" in et:
+            write_state("graphiti_review_done",True)
+        write_state("graphiti_searched",True)
+        print(json.dumps({"decision":"approve"})); return
 
-        # If searching for Learnings, mark review as done
-        if "learning" in entity_types_str or "decision" in entity_types_str or "concept" in entity_types_str:
-            write_state("graphiti_review_done", True)
+    print(json.dumps({"decision":"approve"}))
 
-        print(json.dumps({"decision": "approve"}))
-        return
-
-    # Default: allow other graphiti tools
-    print(json.dumps({"decision": "approve"}))
-
-
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
