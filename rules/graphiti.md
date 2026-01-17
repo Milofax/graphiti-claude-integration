@@ -5,19 +5,21 @@
   |prüfen:discover_tools_by_words("graphiti")→0 Treffer=SOFORT ESKALIEREN
   |verstoß:Still weiterarbeiten ohne Graphiti→User merkt zu spät→Session kompromittiert
   |eskalation:"⚠️ Graphiti MCP nicht erreichbar! Kann kein Wissen speichern/abrufen."
-  |ursachen:Container down|Traefik kaputt|mcp-funnel Cache stale→Docker restart auf VM
 
-!!erst:Bei Fragen über Personen/Firmen/Projekte→IMMER graphiti__search_nodes() ZUERST
+!!erst:Bei Fragen über gespeichertes Wissen→IMMER graphiti__search_nodes() ZUERST
   |verstoß:Raten/Erfinden ohne Recherche→User bekommt falsche Info→Vertrauen zerstört
-  |trigger:"wer ist"|"kennst du"|"was weißt du über"|Person/Firma/Projekt erwähnt
+  |trigger:"wer"|"was weißt du"|"kennst du"|"habe ich"|"was ist mein"|"wie mache ich"|"was muss ich"
+  |entity_types:Person|Organization|Location|Event|Project|Requirement|Procedure|Concept
+               |Learning|Document|Topic|Object|Preference|Decision|Goal|Task|Work
   |warnsignal:Antwort ohne search_nodes()=STOP→erst recherchieren
+  |ausnahme:Allgemeines Weltwissen(nicht persönlich)→Web/Docs nutzen
 
 !zuständig:Persönliches Wissen|Kontakte,Firmen,Projekte|Entscheidungen,Präferenzen|Session-übergreifendes Gedächtnis
 !nicht_zuständig:Allgemeines Weltwissen|Aktuelle News|Code-Dokumentation(→Context7)
 !aktivierung:discover_tools_by_words("graphiti",enable=true)
 
 ## tools
-add_memory:name+episode_body+source_description?+group_id?→Wissen speichern(Entity-Extraktion automatisch,~30-50s)
+add_memory:name+episode_body+source_description?+group_id?→Wissen speichern(Entity-Extraktion automatisch)
 search_nodes:query+group_ids?+entity_types?+max_nodes?→Semantische Hybrid-Suche nach Entities
 search_memory_facts:query+group_ids?+max_facts?+center_node_uuid?→Suche nach Fakten/Beziehungen(Edges)
 get_entity_edge:uuid→Details zu Beziehung
@@ -27,9 +29,9 @@ delete_episode:uuid→Episode löschen
 clear_graph:group_ids?→Graph leeren(⚠️destruktiv,IMMER fragen)
 get_status:→Service-Status prüfen
 
-## entity_types(15)
-Person|Organization|Location|Event|Project|Requirement|Procedure
-Concept|Learning|Document|Topic|Object|Preference|Decision|Goal
+## entity_types(17)
+Person|Organization|Location|Event|Project|Requirement|Procedure|Concept
+Learning|Document|Topic|Object|Preference|Decision|Goal|Task|Work
 
 ## wann_welcher_type
 Person:Einzelne Menschen→"Wer ist X?"|"X arbeitet bei Y"|Kontakte,Familie,Kollegen,Klienten
@@ -47,6 +49,8 @@ Object:Physische Dinge→"Mein X"|Gitarre,FM3,Laufschuhe|Fallback
 Preference:Meinung→"Ich mag X"|"Ich bevorzuge Y"|Subjektiv
 Decision:Wahl+Warum→"Entscheidung: X weil Y"|Architektur,Business,Persönlich
 Goal:Ziele→"Mein Ziel"|"Bis Q2"|OKRs,Gewohnheiten,Targets
+Task:Zu erledigen→"Ich muss X"|"Todo"|"Aufgabe"|Assignments,Action Items,Reminders
+Work:Kreatives Werk→"Song X"|"Album Y"|"Film Z"|"Buch Y"|Songs,Alben,Filme,Romane,Gemälde
 
 ## unterscheidung_kritisch
 Concept≠Learning:Concept=externes Wissen(OKRs existieren)|Learning=persönliche Erfahrung(OKRs haben bei uns nicht funktioniert)
@@ -54,12 +58,29 @@ Decision≠Preference:Decision=getroffen+Begründung|Preference=Meinung ohne Ent
 Person≠Organization:Person=Individuum|Organization=Gruppe(auch 2 Personen)
 Requirement≠Preference:Requirement=MUSS|Preference=MÖCHTE
 Topic≠Concept:Topic=Kategorie/Feld|Concept=konkretes Wissen/Framework
+Task≠Goal:Task=konkrete Aufgabe(zu tun)|Goal=Ergebnis(zu erreichen)
+Task≠Requirement:Task=Action Item(ich tue)|Requirement=Constraint(muss erfüllt sein)
+Task[persönlich]≠Task[projekt]:Task[persönlich]=eigene Todos("einkaufen")→main|Task[projekt]=Projekt-Aufgabe("Tests fixen")→project-*
+Work≠Document:Work=Werk das ich erlebe/spiele(Song,Roman)|Document=Quelle die ich zitiere(RFC,Fachbuch)
+Work≠Document≠Concept(Bücher):Work=Buch lesen("Ich lese X")|Document=Buch zitieren("Laut X...")|Concept=Ideen anwenden("X-Prinzipien")
+
+## ambiguität
+!werk_mit_meinung:"[Werk] ist gut/schlecht"→BEIDE speichern
+  |work:"[Titel] von [Künstler]"
+  |preference:"User findet [Titel] gut/schlecht"
+  |beispiel:"Clean Code ist gut"→Work(Buch)+Preference(User-Meinung)
+!typ_unklar:Bei Ambiguität→User fragen
+  |beispiel:"Meinst du das Buch 'Clean Code' (Work) oder das Konzept Clean Code (Concept)?"
 
 ## validierung
-!quelle_pflicht:IMMER source_description angeben|Verstoß=add_memory ohne Quelle
+!!quelle_pflicht:IMMER source_description angeben
+  |warnsignal:add_memory geplant ohne Quelle→STOP
+  |verstoß:Speichern ohne Quelle→Wissen kontaminiert→Vertrauen zerstört
+  |aktion:Quelle recherchieren|User fragen|DANN speichern
 !user_aussage:User sagt etwas über sich→wörtlich speichern|source:"User-Aussage"
 !recherche:Fakt aus Recherche→mit Quelle speichern|source:"[URL/Buch/Artikel]"
-!unsicher:Bei Unsicherheit→ERST fragen:"Soll ich speichern: [Fakt]? Quelle: [X]"|Verstoß=Still speichern
+!!unsicher:Bei Unsicherheit→ERST fragen:"Soll ich speichern: [Fakt]? Quelle: [X]?"
+  |verstoß:Still speichern ohne Bestätigung→falsches Wissen→Vertrauen zerstört
 !nie:Annahmen als Fakten|Gerüchte|Unbestätigtes|Allgemeinwissen(gehört nicht in persönliches Wissen)
 
 !!nie_credentials:NIEMALS Passwörter,API-Keys,Tokens,PINs,Kreditkarten speichern
@@ -79,10 +100,14 @@ leer:search gibt nichts→Recherche- und Suchtools nutzen→Ergebnis speichern m
   |allgemein:Recherchierbar→recherchieren→finden→speichern→antworten
   |verstoß:Erfinden/Raten OHNE Recherche
 
-## group_id_trennung(KRITISCH)
-!trennung:Persönliches Wissen GETRENNT von Projektwissen|Verstoß=Projektwissen in "main" speichern
-!main_only:Kontakte,Learnings,Decisions,Preferences,Goals→group_id:"main"(permanent)
-!projekt:Projektdateien,temporäres Wissen→group_id:"project-[name]"(temporär)
+## group_id_trennung
+!!trennung:Persönliches Wissen GETRENNT von Projektwissen
+  |verstoß:Projektwissen in "main"→Kontamination→main nicht mehr löschbar→Session kompromittiert
+  |trigger:add_memory OHNE explizite group_id bei Projekt-Arbeit
+  |warnsignal:"Ich speichere..." ohne "group_id:" ausgesprochen=STOP
+  |recovery:search_nodes(group_ids:["main"])→identifizieren→delete_episode
+!main_only:Kontakte,Learnings,Decisions,Preferences,Goals,Task[persönlich]→group_id:"main"(permanent)
+!projekt:Projektdateien,temporäres Wissen,Task[projekt]→group_id:"project-[name]"(temporär)
 !suche_default:Ohne group_ids→sucht nur in "main"|Mit group_ids→sucht in angegebenen
 
 ## group_ids
@@ -115,11 +140,15 @@ aus_pfad:Working Directory enthält Projektname→group_id ableiten
 aus_claude_md:CLAUDE.md kann graphiti_group_id definieren(wenn vorhanden)
 fallback:Unsicher welches Projekt?→User fragen:"Welche group_id soll ich verwenden?"
 
-## vor_projekt_ende(KRITISCH)
-!review:VOR clear_graph→Learnings reviewen|"Gibt es übergreifende Erkenntnisse die ich nach main promoten soll?"
-!promoten:Relevante Learnings/Decisions→add_memory(...,group_id:"main")→DANN clear_graph
+## vor_projekt_ende
+!!review:VOR clear_graph→IMMER Learnings/Decisions reviewen
+  |verstoß:clear_graph ohne Review→übergreifendes Wissen verloren→irreversibel
+  |aktion:search_nodes(entity_types:["Learning","Decision"])→promoten→DANN clear_graph
+  |frage:"Gibt es übergreifende Erkenntnisse die ich nach main promoten soll?"
+!!promoten:Relevante Learnings/Decisions→add_memory(...,group_id:"main")→DANN clear_graph
+  |verstoß:Wertvolles Wissen nicht promotet→nach clear_graph verloren
 !verlust:Nach clear_graph ist Projektwissen WEG|Nur "main" Wissen überlebt
-beispiel:Learning "qwen3:32b ist gut für Entity-Extraktion"→nach main(projektübergreifend relevant)
+beispiel:Learning "Claude Opus 4.5 über CLIProxyAPI funktioniert gut"→nach main(projektübergreifend relevant)
 beispiel:Requirement "API muss /health haben"→NICHT nach main(nur für dieses Projekt)
 
 ## params
@@ -130,23 +159,29 @@ search_memory_facts:query(required)|group_ids(filter,array)|max_facts(default:10
 ## eingabe_muster
 person:"[Name] ist [Rolle] bei [Org]"
 concept:"[Begriff] ist [Definition/Framework]"
-learning:"Ich habe gelernt: [Erkenntnis]"
+learning:"Ich habe gelernt: [Erkenntnis]"|kann positiv ODER negativ sein
 decision:"Entscheidung: [Was] weil [Warum]"
 goal:"Mein Ziel: [Ziel] bis [Zeitraum]"
-document:"Das Konzept [X] stammt aus [Buch/Artikel] von [Autor]"
+task:"Ich muss [Aufgabe]"|"Todo: [Action Item]"
+document:"Quelle: [Titel] von [Autor] ([Jahr])"
+work:"[Titel] von [Autor/Künstler]"|"Song/Album/Film/Buch"
 
-## infrastruktur
-host:Ubuntu VM(192.168.1.10)|ollama:AI-PC(192.168.1.12)
-mcp_endpoint:https://graphiti.marakanda.biz/mcp
-graph_ui:http://192.168.1.10:3001(FalkorDB Browser,nur lokal)
-backup:Docker Volume auf Ubuntu VM
+## pflichtattribute_zitierbar
+!!fehlende_attribute:Pflichtattribute unbekannt→ERST recherchieren→DANN User fragen
+  |verstoß:Raten/Unvollständig speichern→Quelle nicht zitierbar→Wissen wertlos
+document:
+  !buch:Autor+Titel+Jahr|empfohlen:Verlag,Auflage,ISBN
+  !artikel:Autor+Titel+Quelle+Jahr|empfohlen:Volume,Seiten
+  !web:URL+Zugriffsdatum|empfohlen:Autor/Organisation
+  !spec:Nummer+Jahr|empfohlen:Organisation
+  !bibelvers:Buch+Kapitel:Vers|beispiel:"Johannes 3:16"
+work:
+  !musikstück:Titel+Künstler/Komponist|empfohlen:Album,Jahr
+  !album:Titel+Künstler+Jahr|empfohlen:Label
+  !film:Titel+Regisseur+Jahr|empfohlen:Studio
+  !roman:Titel+Autor+Jahr|empfohlen:Verlag
+  !gemälde:Titel+Künstler|empfohlen:Jahr,Museum
+  !podcast:Titel+Host|empfohlen:Episode,Jahr
 
-## performance
-verarbeitung:~30-50s pro Episode(qwen3:32b auf RTX 5090)
-suche:<1s|queue:Episodes werden sequentiell pro group_id verarbeitet
-
-## fehler
-nicht_gefunden→breiteren Begriff verwenden|entity_types Filter entfernen
-ollama_offline→AI-PC Ollama Service prüfen(192.168.1.12:11434)
-timeout→normal für add_memory(30-50s)|bei >60s→Logs prüfen
-connection→Docker Container auf Ubuntu VM prüfen
+## suchtipps
+nicht_gefunden→breiteren Begriff verwenden|entity_types Filter entfernen|andere group_ids probieren
