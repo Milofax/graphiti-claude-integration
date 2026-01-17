@@ -50,11 +50,14 @@ const SOURCE_RULES_DIR = path.join(PACKAGE_ROOT, 'rules');
 const HOOKS = {
   'session-start': ['graphiti-context-loader.py'],
   'user-prompt-submit': ['session-reminder.py'],
-  'pre-tool-use': ['graphiti-guard.py']
+  'pre-tool-use': ['graphiti-guard.py', 'graphiti-first-guard.py']
 };
 
-// PreToolUse matchers for graphiti-guard.py
-const PRETOOLUSE_MATCHERS = ['mcp__graphiti.*', 'mcp__mcp-funnel__bridge_tool_request'];
+// PreToolUse matchers - which hooks trigger on which tools
+const PRETOOLUSE_HOOKS = {
+  'graphiti-guard.py': ['mcp__graphiti.*', 'mcp__mcp-funnel__bridge_tool_request'],
+  'graphiti-first-guard.py': ['WebSearch|WebFetch', 'mcp__mcp-funnel__bridge_tool_request']
+};
 
 // Rules
 const RULES = ['graphiti.md'];
@@ -471,27 +474,30 @@ function updateSettings(oldHookCommands, newHookCommands) {
   if (!settings.hooks.PreToolUse) {
     settings.hooks.PreToolUse = [];
   }
-  const graphitiGuardPath = path.join(HOOKS_DIR, 'pre-tool-use', 'graphiti-guard.py');
 
-  for (const matcher of PRETOOLUSE_MATCHERS) {
-    const existing = settings.hooks.PreToolUse.find(e => e.matcher === matcher);
-    if (existing) {
-      // Add to existing matcher entry if not already present
-      if (!existing.hooks.some(h => h.command === graphitiGuardPath)) {
-        existing.hooks.push({
-          type: 'command',
-          command: graphitiGuardPath
+  // Register each hook with its matchers
+  for (const [hookFile, matchers] of Object.entries(PRETOOLUSE_HOOKS)) {
+    const hookPath = path.join(HOOKS_DIR, 'pre-tool-use', hookFile);
+    for (const matcher of matchers) {
+      const existing = settings.hooks.PreToolUse.find(e => e.matcher === matcher);
+      if (existing) {
+        // Add to existing matcher entry if not already present
+        if (!existing.hooks.some(h => h.command === hookPath)) {
+          existing.hooks.push({
+            type: 'command',
+            command: hookPath
+          });
+        }
+      } else {
+        // Create new entry
+        settings.hooks.PreToolUse.push({
+          matcher,
+          hooks: [{
+            type: 'command',
+            command: hookPath
+          }]
         });
       }
-    } else {
-      // Create new entry
-      settings.hooks.PreToolUse.push({
-        matcher,
-        hooks: [{
-          type: 'command',
-          command: graphitiGuardPath
-        }]
-      });
     }
   }
 
