@@ -90,8 +90,16 @@ Work≠Document≠Concept(Bücher):Work=Buch lesen("Ich lese X")|Document=Buch z
   |warnsignal:User erwähnt Credentials→"Das gehört in 1Password, nicht in Graphiti"
 
 ## workflow
-speichern:add_memory(name,episode_body,source_description)→automatische Entity-Extraktion
-  |vor_speichern:Quelle klar?→JA:speichern|NEIN:User fragen
+!!vor_add_memory:group_id ENTSCHEIDEN bevor add_memory aufgerufen wird
+  |hook_zeigt:Hook zeigt aktuellen Kontext→VERWENDEN(project-*)
+  |procedure:FAST IMMER projekt-spezifisch→project-*
+  |requirement:FAST IMMER projekt-spezifisch→project-*
+  |learning:Allgemeingültig?→JA:main|NEIN:project-*
+  |decision:Übertragbar auf andere Projekte?→JA:main|NEIN:project-*
+  |warnsignal:add_memory ohne group_id-Überlegung=STOP
+  |verstoß:Falsches group_id→Kontamination→manuelles Cleanup nötig
+speichern:add_memory(name,episode_body,source_description,group_id)→automatische Entity-Extraktion
+  |vor_speichern:1.group_id entschieden?→2.Quelle klar?→JA:speichern|NEIN:User fragen
   |user_kontext:User erzählt→source:"User-Aussage [Datum]"
   |recherche_kontext:Aus Web/Docs→source:"[Quelle mit URL/Referenz]"
 abrufen:Frage über Person/Firma/Projekt→search_nodes(query,entity_types)→mit Ergebnis antworten
@@ -161,7 +169,7 @@ beispiel:Learning "Claude Opus 4.5 über CLIProxyAPI funktioniert gut"→nach ma
 beispiel:Requirement "API muss /health haben"→NICHT nach main(nur für diesen Kontext)
 
 ## params
-add_memory:name(required)|episode_body(required)|source_description(empfohlen)|group_id(default:"main")|source:"text"|"json"|"message"
+add_memory:name(required)|episode_body(required)|source_description(required)|group_id(default:"main")|source:"text"|"json"|"message"
 search_nodes:query(required)|group_ids(filter,array,default:["main"])|entity_types(filter,array)|max_nodes(default:10)
 search_memory_facts:query(required)|group_ids(filter,array)|max_facts(default:10)|center_node_uuid(optional)
 
@@ -179,7 +187,7 @@ work:"[Titel] von [Autor/Künstler]"|"Song/Album/Film/Buch"
 !!fehlende_attribute:Pflichtattribute unbekannt→ERST recherchieren→DANN User fragen
   |verstoß:Raten/Unvollständig speichern→Quelle nicht zitierbar→Wissen wertlos
 document:
-  !buch:Autor+Titel+Jahr|empfohlen:Verlag,Auflage,ISBN
+  !buch:Autor+Titel+Jahr+ISBN|empfohlen:Verlag,Auflage
   !artikel:Autor+Titel+Quelle+Jahr|empfohlen:Volume,Seiten
   !web:URL+Zugriffsdatum|empfohlen:Autor/Organisation
   !spec:Nummer+Jahr|empfohlen:Organisation
