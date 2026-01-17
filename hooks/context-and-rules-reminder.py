@@ -100,15 +100,18 @@ else:
     project_line = "📁 main (persönlich)"
 
 context = f"""
-⚠️ **STOPP. DREI FRAGEN.**
+🛑 **Session ist erst DONE wenn:**
 
-1. Folgst du allen Regeln?
-2. Was weißt du bereits?
-3. Was ist es wert zu behalten?
+1. **Keine Regelverstöße**
+2. **100% Wissen, 0% Raten:**
+   - Graphiti fragen (search_nodes)
+   - Recherchieren (Web/Docs)
+   - ODER: "Ich weiß es nicht"
+3. **Learnings in Graphiti gespeichert** → add_memory()
 
 {project_line}
 
-Wenn nicht → kein Vertrauen → nutzlos.
+**Sonst → kompletter Vertrauensverlust!**
 """
 
 output = {
