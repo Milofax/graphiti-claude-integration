@@ -14,8 +14,8 @@
   |warnsignal:Antwort ohne search_nodes()=STOP→erst recherchieren
   |ausnahme:Allgemeines Weltwissen(nicht persönlich)→Web/Docs nutzen
 
-!zuständig:Persönliches Wissen|Kontakte,Firmen,Projekte|Entscheidungen,Präferenzen|Session-übergreifendes Gedächtnis
-!nicht_zuständig:Allgemeines Weltwissen|Aktuelle News|Code-Dokumentation(→Context7)
+!zuständig:Langfristiges Wissen|Kontakte,Learnings,Decisions|Kontextspezifisches Wissen|Session-übergreifendes Gedächtnis
+!nicht_zuständig:Allgemeines Weltwissen|Aktuelle News|Code-Dokumentation(→Context7)|Flüchtiges/Temporäres
 !aktivierung:discover_tools_by_words("graphiti",enable=true)
 
 ## tools
@@ -101,55 +101,64 @@ leer:search gibt nichts→Recherche- und Suchtools nutzen→Ergebnis speichern m
   |verstoß:Erfinden/Raten OHNE Recherche
 
 ## group_id_trennung
-!!trennung:Persönliches Wissen GETRENNT von Projektwissen
-  |verstoß:Projektwissen in "main"→Kontamination→main nicht mehr löschbar→Session kompromittiert
-  |trigger:add_memory OHNE explizite group_id bei Projekt-Arbeit
-  |warnsignal:"Ich speichere..." ohne "group_id:" ausgesprochen=STOP
+!!trennung:Langfristiges Wissen GETRENNT von kontextgebundenem Wissen
+  |prinzip:main=überlebt alles|project-*=löschbar nach Kontext-Ende
+  |verstoß:Temporäres Wissen in "main"→Kontamination→main aufgebläht→nicht mehr wartbar
+  |trigger:add_memory→IMMER fragen:"Ist das langfristig relevant oder nur hier?"
+  |warnsignal:"Ich speichere..." ohne group_id-Überlegung=STOP
   |recovery:search_nodes(group_ids:["main"])→identifizieren→delete_episode
-!main_only:Kontakte,Learnings,Decisions,Preferences,Goals,Task[persönlich]→group_id:"main"(permanent)
-!projekt:Projektdateien,temporäres Wissen,Task[projekt]→group_id:"project-[name]"(temporär)
+!main:Langfristiges,allgemeingültiges Wissen→group_id:"main"(PERMANENT)
+  |bleibt_relevant:Kontakte|Learnings|Decisions|Preferences|Goals|Concepts|Documents|Works
+  |beispiel:Learning "GraphQL ist für kleine Teams overkill"→main(gilt immer)
+  |beispiel:Decision "FalkorDB statt Neo4j wegen Einfachheit"→main(Erfahrungswert)
+!kontext:Kontextgebundenes,begrenztes Wissen→group_id:"project-[name]"(TEMPORÄR)
+  |nur_hier_relevant:Requirements|Procedures|Architektur-Details|Projekt-Tasks
+  |beispiel:Requirement "API braucht /health endpoint"→project-*(nur dieses Projekt)
+  |beispiel:Procedure "Deploy via git push + docker compose"→project-*(nur dieses Repo)
 !suche_default:Ohne group_ids→sucht nur in "main"|Mit group_ids→sucht in angegebenen
 
 ## group_ids
-!naming:Name FREI WÄHLBAR|Einzige Ausnahme:"main" ist RESERVIERT für persönliches Wissen
-!main_reserviert:"main"=NIEMALS für Projekte verwenden|NIEMALS löschen|Persönlich+Permanent
-beispiele_gültig:prp|infrastructure|mein-projekt|bmad-v2|kunde-xyz|2024-redesign
+!naming:Name FREI WÄHLBAR|Einzige Ausnahme:"main" ist RESERVIERT
+!main_reserviert:"main"=NIEMALS für Projekte|NIEMALS löschen|Langfristig+Permanent
+beispiele_gültig:prp|infrastructure|bmad-v2|kunde-xyz|2024-redesign
 beispiele_ungültig:main(reserviert)
 
-main:Persönliches Wissen(PERMANENT)|Kontakte,Familie,Learnings,Decisions,Preferences,Goals
-  |NIEMALS löschen|Überlebt alle Projekte
-[frei-wählbar]:Projektwissen(TEMPORÄR)|Projektdateien,Architektur,Requirements,Procedures
-  |Name frei wählbar,z.B.:prp,infrastructure,bmad,kunde-abc
-  |Löschen erlaubt nach Projektabschluss:clear_graph(group_ids:["dein-name"])
+main:Langfristiges Wissen(PERMANENT)|Kontakte,Learnings,Decisions,Preferences,Goals,Concepts,Documents,Works
+  |NIEMALS löschen|Überlebt alle Kontexte
+  |frage:"Werde ich das in 5 Jahren noch wissen wollen?"→JA=main
+[frei-wählbar]:Kontextgebundenes Wissen(TEMPORÄR)|Requirements,Procedures,Architektur,Projekt-Tasks
+  |Name frei wählbar,z.B.:prp,infrastructure,kunde-abc
+  |Löschen erlaubt nach Kontext-Ende:clear_graph(group_ids:["dein-name"])
+  |frage:"Ist das nur für diesen Kontext relevant?"→JA=project-*
 
 ## wann_welche_group
-main:User erzählt persönliches|Learning aus Erfahrung|Kontakt/Person|Präferenz|Entscheidung|Ziel
-project-[name]:Projektdatei indexiert|Architektur-Doc|Requirement aus PRD|Procedure für Projekt
-beide_suchen:Arbeit an Projekt→search(group_ids:["main","project-xyz"])|Persönlich+Projektkontext
+main:Learning(allgemeingültig)|Decision(übertragbar)|Kontakt|Präferenz|Ziel|Concept|Document|Work
+project-*:Requirement(projektspezifisch)|Procedure(kontextspezifisch)|Architektur-Detail|Projekt-Task
+beide_suchen:Arbeit in Kontext→search(group_ids:["main","project-xyz"])|Langfristig+Kontext
 
 ## group_workflow
-projekt_start:Dateien indexieren mit group_id:"project-[name]"
-projekt_arbeit:search(group_ids:["main","project-[name]"])→beides durchsuchen
-projekt_ende:ERST Learnings nach "main" promoten→DANN clear_graph(group_ids:["project-[name]"])
-übergreifend:Learning aus Projekt→nach "main" speichern(bleibt permanent)
+kontext_start:Dateien indexieren mit group_id:"project-[name]"
+kontext_arbeit:search(group_ids:["main","project-[name]"])→beides durchsuchen
+kontext_ende:ERST langfristiges Wissen nach "main" promoten→DANN clear_graph(group_ids:["project-[name]"])
+übertragbar:Learning/Decision aus Kontext→nach "main" speichern(bleibt permanent)
 
-## projekt_erkennung
-aus_pfad:Working Directory enthält Projektname→group_id ableiten
+## kontext_erkennung
+aus_pfad:Working Directory→group_id ableiten
   |/Volumes/DATEN/Coding/PRP→project-prp
   |/Volumes/DATEN/Coding/INFRASTRUCTURE→project-infrastructure
 aus_claude_md:CLAUDE.md kann graphiti_group_id definieren(wenn vorhanden)
-fallback:Unsicher welches Projekt?→User fragen:"Welche group_id soll ich verwenden?"
+fallback:Unsicher welcher Kontext?→User fragen:"Welche group_id soll ich verwenden?"
 
-## vor_projekt_ende
-!!review:VOR clear_graph→IMMER Learnings/Decisions reviewen
-  |verstoß:clear_graph ohne Review→übergreifendes Wissen verloren→irreversibel
-  |aktion:search_nodes(entity_types:["Learning","Decision"])→promoten→DANN clear_graph
-  |frage:"Gibt es übergreifende Erkenntnisse die ich nach main promoten soll?"
-!!promoten:Relevante Learnings/Decisions→add_memory(...,group_id:"main")→DANN clear_graph
+## vor_kontext_ende
+!!review:VOR clear_graph→IMMER langfristig relevantes Wissen reviewen
+  |verstoß:clear_graph ohne Review→übertragbares Wissen verloren→irreversibel
+  |aktion:search_nodes(entity_types:["Learning","Decision","Concept"])→promoten→DANN clear_graph
+  |frage:"Gibt es allgemeingültige Erkenntnisse die ich nach main promoten soll?"
+!!promoten:Übertragbare Learnings/Decisions/Concepts→add_memory(...,group_id:"main")→DANN clear_graph
   |verstoß:Wertvolles Wissen nicht promotet→nach clear_graph verloren
-!verlust:Nach clear_graph ist Projektwissen WEG|Nur "main" Wissen überlebt
-beispiel:Learning "Claude Opus 4.5 über CLIProxyAPI funktioniert gut"→nach main(projektübergreifend relevant)
-beispiel:Requirement "API muss /health haben"→NICHT nach main(nur für dieses Projekt)
+!verlust:Nach clear_graph ist Kontext-Wissen WEG|Nur "main" Wissen überlebt
+beispiel:Learning "Claude Opus 4.5 über CLIProxyAPI funktioniert gut"→nach main(allgemeingültig)
+beispiel:Requirement "API muss /health haben"→NICHT nach main(nur für diesen Kontext)
 
 ## params
 add_memory:name(required)|episode_body(required)|source_description(empfohlen)|group_id(default:"main")|source:"text"|"json"|"message"
