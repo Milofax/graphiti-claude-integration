@@ -30,11 +30,16 @@ function getCwd() {
 const CWD = getCwd();
 
 // Target paths (relative to current working directory)
+// NEW: Subdirectory structure for isolation
 const CLAUDE_DIR = CWD ? path.join(CWD, '.claude') : null;
-const HOOKS_DIR = CLAUDE_DIR ? path.join(CLAUDE_DIR, 'hooks') : null;
-const RULES_DIR = CLAUDE_DIR ? path.join(CLAUDE_DIR, 'rules') : null;
+const HOOKS_DIR = CLAUDE_DIR ? path.join(CLAUDE_DIR, 'hooks', PACKAGE_NAME) : null;
+const RULES_DIR = CLAUDE_DIR ? path.join(CLAUDE_DIR, 'rules', PACKAGE_NAME) : null;
 const SETTINGS_PATH = CLAUDE_DIR ? path.join(CLAUDE_DIR, 'settings.json') : null;
 const STATE_PATH = CLAUDE_DIR ? path.join(CLAUDE_DIR, `${PACKAGE_NAME}-state.json`) : null;
+
+// Legacy paths (for cleanup detection)
+const LEGACY_HOOKS_DIR = CLAUDE_DIR ? path.join(CLAUDE_DIR, 'hooks') : null;
+const LEGACY_RULES_DIR = CLAUDE_DIR ? path.join(CLAUDE_DIR, 'rules') : null;
 
 // Source paths (relative to package root)
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
@@ -125,6 +130,78 @@ function validateEnvironment() {
   }
 
   return { valid: true };
+}
+
+/**
+ * Check if a file/symlink exists at path
+ */
+function fileExists(filePath) {
+  try {
+    fs.lstatSync(filePath);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Detect if graphiti is installed (checks both legacy and new paths)
+ */
+function detectInstalled() {
+  const newPath = path.join(RULES_DIR, 'graphiti.md');
+  const legacyPath = path.join(LEGACY_RULES_DIR, 'graphiti.md');
+  return fileExists(newPath) || fileExists(legacyPath);
+}
+
+/**
+ * Remove ALL legacy files (for migration)
+ */
+function removeAllLegacyFiles() {
+  let removed = 0;
+
+  // Remove legacy hooks
+  for (const [hookType, files] of Object.entries(HOOKS)) {
+    for (const file of files) {
+      const legacyPath = path.join(LEGACY_HOOKS_DIR, hookType, file);
+      if (fileExists(legacyPath)) {
+        try {
+          fs.unlinkSync(legacyPath);
+          log(`Migrated: ${file}`);
+          removed++;
+        } catch (e) {
+          // Ignore
+        }
+      }
+    }
+  }
+
+  // Remove legacy rules
+  for (const rule of RULES) {
+    const legacyPath = path.join(LEGACY_RULES_DIR, rule);
+    if (fileExists(legacyPath)) {
+      try {
+        fs.unlinkSync(legacyPath);
+        log(`Migrated: ${rule}`);
+        removed++;
+      } catch (e) {
+        // Ignore
+      }
+    }
+  }
+
+  // Remove legacy lib
+  const legacyLib = path.join(LEGACY_HOOKS_DIR, 'lib', 'session_state.py');
+  if (fileExists(legacyLib)) {
+    try {
+      fs.unlinkSync(legacyLib);
+      log('Migrated: session_state.py');
+      removed++;
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  return removed;
 }
 
 function log(msg) {
@@ -247,6 +324,12 @@ function installSharedLibrary() {
 function install() {
   log('Installing Graphiti integration...');
   log(`Target: ${CLAUDE_DIR}`);
+
+  // Migrate ALL legacy files first (seamless upgrade)
+  const migrated = removeAllLegacyFiles();
+  if (migrated > 0) {
+    log(`Migrated ${migrated} legacy files to new structure`);
+  }
 
   // Install shared library from claude-hooks-core
   installSharedLibrary();
@@ -422,23 +505,49 @@ function uninstall() {
   const state = readState();
   let removed = { hooks: 0, rules: 0 };
 
-  // Remove hooks
+  // Remove hooks (both new and legacy paths)
   for (const [hookType, files] of Object.entries(HOOKS)) {
     for (const file of files) {
+      // Try new path
       const filePath = path.join(HOOKS_DIR, hookType, file);
       if (deleteFile(filePath)) {
         removed.hooks++;
         log(`Removed: ${file}`);
       }
+      // Try legacy path
+      const legacyPath = path.join(LEGACY_HOOKS_DIR, hookType, file);
+      if (deleteFile(legacyPath)) {
+        removed.hooks++;
+        log(`Removed (legacy): ${file}`);
+      }
     }
   }
 
-  // Remove rules
+  // Remove rules (both new and legacy paths)
   for (const rule of RULES) {
+    // Try new path
     const filePath = path.join(RULES_DIR, rule);
     if (deleteFile(filePath)) {
       removed.rules++;
       log(`Removed: ${rule}`);
+    }
+    // Try legacy path
+    const legacyPath = path.join(LEGACY_RULES_DIR, rule);
+    if (deleteFile(legacyPath)) {
+      removed.rules++;
+      log(`Removed (legacy): ${rule}`);
+    }
+  }
+
+  // Remove shared library (both paths)
+  for (const libFile of SHARED_LIB) {
+    const libPath = path.join(HOOKS_DIR, 'lib', libFile);
+    if (deleteFile(libPath)) {
+      log(`Removed lib: ${libFile}`);
+    }
+    const legacyLibPath = path.join(LEGACY_HOOKS_DIR, 'lib', libFile);
+    if (deleteFile(legacyLibPath)) {
+      log(`Removed lib (legacy): ${libFile}`);
     }
   }
 
@@ -457,34 +566,40 @@ function status() {
   console.log('\n=== graphiti-claude-integration Status ===');
   console.log(`Target: ${CLAUDE_DIR}\n`);
 
-  // Check hooks
+  // Check hooks (both new and legacy paths)
   let hooksInstalled = 0;
   let hooksTotal = 0;
   for (const [hookType, files] of Object.entries(HOOKS)) {
     for (const file of files) {
       hooksTotal++;
-      const filePath = path.join(HOOKS_DIR, hookType, file);
-      const exists = fs.existsSync(filePath);
+      const newPath = path.join(HOOKS_DIR, hookType, file);
+      const legacyPath = path.join(LEGACY_HOOKS_DIR, hookType, file);
+      const exists = fileExists(newPath) || fileExists(legacyPath);
       const status = exists ? '  Installed' : '  Not installed';
       if (exists) hooksInstalled++;
       console.log(`  ${hookType}/${file}: ${status}`);
     }
   }
 
-  // Check rules
+  // Check rules (both new and legacy paths)
   let rulesInstalled = 0;
   for (const rule of RULES) {
-    const filePath = path.join(RULES_DIR, rule);
-    const exists = fs.existsSync(filePath);
+    const newPath = path.join(RULES_DIR, rule);
+    const legacyPath = path.join(LEGACY_RULES_DIR, rule);
+    const exists = fileExists(newPath) || fileExists(legacyPath);
     const status = exists ? '  Installed' : '  Not installed';
     if (exists) rulesInstalled++;
     console.log(`  rules/${rule}: ${status}`);
   }
 
-  // Check shared library
-  const libExists = SHARED_LIB.every(f =>
-    fs.existsSync(path.join(HOOKS_DIR, 'lib', f))
+  // Check shared library (both paths)
+  const libInNewPath = SHARED_LIB.every(f =>
+    fileExists(path.join(HOOKS_DIR, 'lib', f))
   );
+  const libInLegacy = SHARED_LIB.every(f =>
+    fileExists(path.join(LEGACY_HOOKS_DIR, 'lib', f))
+  );
+  const libExists = libInNewPath || libInLegacy;
   console.log(`\nShared library (claude-hooks-core):`);
   console.log(`  session_state.py: ${libExists ? '  Installed' : '  Not installed'}`);
   if (!libExists) {

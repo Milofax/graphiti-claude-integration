@@ -17,9 +17,11 @@ import json
 import sys
 import os
 
-# Add shared lib directory to path for session_state import
-SHARED_LIB = os.path.expanduser("~/dotfiles/vendor/shared-claude-rules/hooks/lib")
-sys.path.insert(0, SHARED_LIB)
+# Add lib directory to path for session_state import
+# Path is relative to this hook's location: ../lib/ (same package)
+HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
+LIB_DIR = os.path.join(HOOK_DIR, '..', 'lib')
+sys.path.insert(0, LIB_DIR)
 
 from session_state import register_hook, read_state, write_state
 
