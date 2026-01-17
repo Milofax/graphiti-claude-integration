@@ -18,12 +18,23 @@ const path = require('path');
 
 const PACKAGE_NAME = 'graphiti-claude-integration';
 
+// Get cwd safely
+function getCwd() {
+  try {
+    return process.cwd();
+  } catch (e) {
+    return null;
+  }
+}
+
+const CWD = getCwd();
+
 // Target paths (relative to current working directory)
-const CLAUDE_DIR = path.join(process.cwd(), '.claude');
-const HOOKS_DIR = path.join(CLAUDE_DIR, 'hooks');
-const RULES_DIR = path.join(CLAUDE_DIR, 'rules');
-const SETTINGS_PATH = path.join(CLAUDE_DIR, 'settings.json');
-const STATE_PATH = path.join(CLAUDE_DIR, `${PACKAGE_NAME}-state.json`);
+const CLAUDE_DIR = CWD ? path.join(CWD, '.claude') : null;
+const HOOKS_DIR = CLAUDE_DIR ? path.join(CLAUDE_DIR, 'hooks') : null;
+const RULES_DIR = CLAUDE_DIR ? path.join(CLAUDE_DIR, 'rules') : null;
+const SETTINGS_PATH = CLAUDE_DIR ? path.join(CLAUDE_DIR, 'settings.json') : null;
+const STATE_PATH = CLAUDE_DIR ? path.join(CLAUDE_DIR, `${PACKAGE_NAME}-state.json`) : null;
 
 // Source paths (relative to package root)
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
@@ -53,6 +64,67 @@ function getCorePath() {
     error('claude-hooks-core not found. Run: npm install');
     return null;
   }
+}
+
+/**
+ * Validate environment before running commands
+ * Returns { valid: boolean, error?: string }
+ */
+function validateEnvironment() {
+  // Check 1: CWD exists
+  if (!CWD) {
+    return {
+      valid: false,
+      error: 'Current working directory does not exist or was deleted.\n' +
+             'Please cd to a valid directory and try again.'
+    };
+  }
+
+  // Check 2: CWD is accessible
+  try {
+    fs.accessSync(CWD, fs.constants.R_OK);
+  } catch (e) {
+    return {
+      valid: false,
+      error: `Cannot access current directory: ${CWD}\n` +
+             'Check permissions and try again.'
+    };
+  }
+
+  // Check 3: If .claude exists, it must be a directory (not a file)
+  if (fs.existsSync(CLAUDE_DIR)) {
+    const stat = fs.statSync(CLAUDE_DIR);
+    if (!stat.isDirectory()) {
+      return {
+        valid: false,
+        error: `${CLAUDE_DIR} exists but is not a directory.\n` +
+               'Please remove or rename it and try again.'
+      };
+    }
+  }
+
+  // Check 4: Can write to target directory
+  const testDir = fs.existsSync(CLAUDE_DIR) ? CLAUDE_DIR : CWD;
+  try {
+    fs.accessSync(testDir, fs.constants.W_OK);
+  } catch (e) {
+    return {
+      valid: false,
+      error: `No write permission in: ${testDir}\n` +
+             'Check permissions and try again.'
+    };
+  }
+
+  // Check 5: Source package is complete
+  if (!fs.existsSync(SOURCE_HOOKS_DIR) || !fs.existsSync(SOURCE_RULES_DIR)) {
+    return {
+      valid: false,
+      error: 'Package installation is incomplete.\n' +
+             'Try reinstalling: npm install graphiti-claude-integration'
+    };
+  }
+
+  return { valid: true };
 }
 
 function log(msg) {
@@ -430,20 +502,32 @@ function status() {
 }
 
 // Main
-const command = process.argv[2];
+function main() {
+  const command = process.argv[2];
 
-switch (command) {
-  case 'install':
-    install();
-    break;
-  case 'uninstall':
-    uninstall();
-    break;
-  case 'status':
-    status();
-    break;
-  default:
-    console.log(`
+  // Commands that need validation
+  const needsValidation = ['install', 'uninstall', 'status'];
+
+  if (needsValidation.includes(command)) {
+    const validation = validateEnvironment();
+    if (!validation.valid) {
+      error(validation.error);
+      process.exit(1);
+    }
+  }
+
+  switch (command) {
+    case 'install':
+      install();
+      break;
+    case 'uninstall':
+      uninstall();
+      break;
+    case 'status':
+      status();
+      break;
+    default:
+      console.log(`
 graphiti-claude-integration - Graphiti knowledge graph for Claude Code
 
 Usage:
@@ -455,6 +539,14 @@ Installation target is relative to current directory:
   cd ~        -> installs to ~/.claude/
   cd /project -> installs to /project/.claude/
 
-Note: Requires shared-claude-rules for session_state.py
+Standalone package - installs claude-hooks-core automatically.
 `);
+  }
+}
+
+try {
+  main();
+} catch (err) {
+  error(err.message);
+  process.exit(1);
 }
