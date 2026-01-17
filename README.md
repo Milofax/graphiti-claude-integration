@@ -5,7 +5,7 @@ Claude Code hooks and rules for [Graphiti](https://github.com/getzep/graphiti) k
 ## Installation
 
 ```bash
-npx graphiti-claude-integration install
+npx github:Milofax/graphiti-claude-integration install
 ```
 
 Installs all hooks and rules to `.claude/` relative to current directory. This is a non-interactive command - all components are installed together.
@@ -77,9 +77,9 @@ Person, Organization, Location, Event, Project, Requirement, Procedure, Concept,
 ## Commands
 
 ```bash
-npx graphiti-claude-integration install    # Install hooks + rules
-npx graphiti-claude-integration uninstall  # Remove all
-npx graphiti-claude-integration status     # Show installed
+npx github:Milofax/graphiti-claude-integration install    # Install hooks + rules
+npx github:Milofax/graphiti-claude-integration uninstall  # Remove all
+npx github:Milofax/graphiti-claude-integration status     # Show installed
 ```
 
 ## Structure
