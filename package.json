@@ -1,0 +1,22 @@
+{
+  "name": "graphiti-claude-integration",
+  "version": "1.0.0",
+  "description": "Graphiti knowledge graph integration for Claude Code",
+  "bin": {
+    "graphiti-claude-integration": "./bin/cli.js"
+  },
+  "files": [
+    "hooks/",
+    "rules/",
+    "bin/"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "graphiti",
+    "knowledge-graph",
+    "hooks"
+  ],
+  "author": "Mathias",
+  "license": "MIT"
+}

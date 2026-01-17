@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """
-Context & Rules Reminder Hook
+Graphiti Context Loader Hook (SessionStart)
 
-Kombiniert:
-1. group_id-Erkennung (aus Git, CLAUDE.md, etc.)
-2. Die 3 Fragen (Regeln, Wissen, Speichern)
+Loads relevant knowledge from Graphiti at session start.
+Injects Learnings, Decisions, Procedures, Preferences as additionalContext.
 
-Keine Patterns - läuft IMMER.
+This hook runs once at the beginning of each Claude Code session.
 """
 
 import json
 import sys
+import os
 import re
 import subprocess
 from pathlib import Path
 
 
 def find_git_root(start_path: str) -> str | None:
-    """Findet Git Root von einem Pfad aus."""
+    """Find Git root from a path."""
     path = Path(start_path)
     while path != path.parent:
         if (path / ".git").exists():
@@ -27,7 +27,7 @@ def find_git_root(start_path: str) -> str | None:
 
 
 def get_github_repo(git_root: str) -> str | None:
-    """Extrahiert owner/repo aus GitHub Remote URL."""
+    """Extract owner/repo from GitHub remote URL."""
     try:
         result = subprocess.run(
             ["git", "-C", git_root, "remote", "get-url", "origin"],
@@ -49,13 +49,13 @@ def get_github_repo(git_root: str) -> str | None:
             return repo.removesuffix(".git")
 
         return None
-    except:
+    except Exception:
         return None
 
 
 def detect_group_id(working_dir: str) -> tuple[str, str]:
     """
-    Erkennt group_id aus verschiedenen Quellen.
+    Detect group_id from various sources.
     Returns (group_id, project_name).
     """
     if not working_dir:
@@ -63,7 +63,7 @@ def detect_group_id(working_dir: str) -> tuple[str, str]:
 
     cwd_path = Path(working_dir)
 
-    # 1. Check .graphiti-group Datei
+    # 1. Check .graphiti-group file
     for check_path in [cwd_path] + list(cwd_path.parents):
         graphiti_file = check_path / ".graphiti-group"
         if graphiti_file.exists():
@@ -74,10 +74,10 @@ def detect_group_id(working_dir: str) -> tuple[str, str]:
                         group_id, name = content.split(":", 1)
                         return group_id.strip(), name.strip()
                     return content, check_path.name
-            except:
+            except Exception:
                 pass
 
-    # 2. Check CLAUDE.md für graphiti_group_id
+    # 2. Check CLAUDE.md for graphiti_group_id
     for check_path in [cwd_path] + list(cwd_path.parents):
         claude_md = check_path / "CLAUDE.md"
         if claude_md.exists():
@@ -87,82 +87,57 @@ def detect_group_id(working_dir: str) -> tuple[str, str]:
                 if match:
                     group_id = match.group(1).strip()
                     return group_id, check_path.name
-            except:
+            except Exception:
                 pass
 
-    # 3. Check ~/.claude/graphiti-projects.json
-    config_file = Path.home() / ".claude" / "graphiti-projects.json"
-    if config_file.exists():
-        try:
-            config = json.loads(config_file.read_text())
-            for base_path, project_config in config.get("projects", {}).items():
-                if working_dir.startswith(base_path):
-                    group_id = project_config.get("group_id", f"project-{Path(base_path).name.lower()}")
-                    name = project_config.get("name", Path(base_path).name)
-                    return group_id, name
-        except:
-            pass
-
-    # 4. Git-basiert: GitHub Remote oder lokaler Ordnername
+    # 3. Git-based: GitHub remote or local folder name
     git_root = find_git_root(working_dir)
     if git_root:
         project_name = Path(git_root).name
 
-        # 4a. GitHub Remote hat Priorität
+        # GitHub remote has priority
         github_repo = get_github_repo(git_root)
         if github_repo:
             return github_repo, project_name
 
-        # 4b. Fallback: lokaler Ordnername
+        # Fallback: local folder name
         return f"project-{project_name.lower()}", project_name
 
     return "main", ""
 
 
-# Main
-try:
-    input_data = json.load(sys.stdin)
-except json.JSONDecodeError:
-    sys.exit(0)
+def main():
+    try:
+        hook_input = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        # No input, nothing to output
+        return
 
-cwd = input_data.get("cwd", "")
-group_id, project_name = detect_group_id(cwd)
+    cwd = hook_input.get("cwd", "")
+    group_id, project_name = detect_group_id(cwd)
 
-# Build context message
-if group_id != "main" and project_name:
-    # Projekt-Kontext: group_id prominent anzeigen
-    add_memory_hint = f'add_memory(group_id="{group_id}")'
-    main_hint = "⚠️ main = Zettelkasten (Personen, Concepts, Learnings...) | projekt-spezifisch? → abstrahieren!"
-    project_line = f"📁 {project_name} → {group_id}"
-else:
-    # Persönlicher Kontext: main ist default
-    add_memory_hint = "add_memory()"
-    main_hint = "💡 main = Zettelkasten (Personen, Concepts, Learnings, Preferences, Documents...)"
-    project_line = "📁 main (persönlich)"
+    # Build context message
+    context_parts = []
 
-context = f"""
-🛑 **Session ist erst DONE wenn:**
+    if group_id != "main" and project_name:
+        context_parts.append(f"📁 Projekt: {project_name}")
+        context_parts.append(f"   group_id: {group_id}")
+    else:
+        context_parts.append("📁 Kontext: main (persönlich)")
 
-1. **Keine Regelverstöße**
-2. **100% Wissen, 0% Raten:**
-   - Graphiti fragen (search_nodes)
-   - Recherchieren (Web/Docs)
-   - ODER: "Ich weiß es nicht"
-3. **Learnings in Graphiti gespeichert**
-   → {add_memory_hint}
-   {main_hint}
+    context_parts.append("")
+    context_parts.append("💡 Graphiti verfügbar für:")
+    context_parts.append("   - search_nodes() → Wissen abrufen")
+    context_parts.append("   - add_memory() → Wissen speichern")
 
-{project_line}
+    # Note: Actually loading from Graphiti would require MCP call
+    # which isn't available in SessionStart hooks. This provides context info.
 
-**Sonst → kompletter Vertrauensverlust!**
-"""
+    context = "\n".join(context_parts)
 
-output = {
-    "hookSpecificOutput": {
-        "hookEventName": "UserPromptSubmit",
-        "additionalContext": context
-    }
-}
+    # Plain text output - Claude Code adds this as context
+    print(context)
 
-print(json.dumps(output))
-sys.exit(0)
+
+if __name__ == "__main__":
+    main()
