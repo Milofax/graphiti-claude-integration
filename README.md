@@ -8,7 +8,7 @@ Claude Code hooks and rules for [Graphiti](https://github.com/getzep/graphiti) k
 npx graphiti-claude-integration install
 ```
 
-Installs to `.claude/` relative to current directory.
+Installs all hooks and rules to `.claude/` relative to current directory. This is a non-interactive command - all components are installed together.
 
 **Prerequisite:** A running Graphiti MCP server configured in Claude Code.
 
