@@ -18,5 +18,8 @@
     "hooks"
   ],
   "author": "Mathias",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "claude-hooks-core": "github:Milofax/claude-hooks-core"
+  }
 }

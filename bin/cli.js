@@ -43,8 +43,17 @@ const PRETOOLUSE_MATCHERS = ['mcp__graphiti.*', 'mcp__mcp-funnel__bridge_tool_re
 // Rules
 const RULES = ['graphiti.md'];
 
-// Shared library dependency (from shared-claude-rules)
-const SHARED_LIB_PATH = path.join(HOOKS_DIR, 'lib', 'session_state.py');
+// Shared library from claude-hooks-core
+const SHARED_LIB = ['session_state.py'];
+
+function getCorePath() {
+  try {
+    return path.dirname(require.resolve('claude-hooks-core/package.json'));
+  } catch (e) {
+    error('claude-hooks-core not found. Run: npm install');
+    return null;
+  }
+}
 
 function log(msg) {
   console.log(`[${PACKAGE_NAME}] ${msg}`);
@@ -139,13 +148,17 @@ function writeSettings(settings) {
   }
 }
 
-function checkSharedLibrary() {
-  if (!fs.existsSync(SHARED_LIB_PATH)) {
-    warn('shared-claude-rules not installed!');
-    warn('Graphiti hooks need session_state.py from shared-claude-rules.');
-    warn('Run: npx shared-claude-rules install');
-    warn('');
-    return false;
+function installSharedLibrary() {
+  const corePath = getCorePath();
+  if (!corePath) return false;
+
+  ensureDir(path.join(HOOKS_DIR, 'lib'));
+  for (const libFile of SHARED_LIB) {
+    const source = path.join(corePath, 'lib', libFile);
+    const dest = path.join(HOOKS_DIR, 'lib', libFile);
+    if (fs.existsSync(source) && copyFile(source, dest)) {
+      log(`Installed lib: ${libFile} (from claude-hooks-core)`);
+    }
   }
   return true;
 }
@@ -154,8 +167,8 @@ function install() {
   log('Installing Graphiti integration...');
   log(`Target: ${CLAUDE_DIR}`);
 
-  // Check dependency
-  checkSharedLibrary();
+  // Install shared library from claude-hooks-core
+  installSharedLibrary();
 
   // Create directories
   for (const hookType of Object.keys(HOOKS)) {
@@ -387,12 +400,14 @@ function status() {
     console.log(`  rules/${rule}: ${status}`);
   }
 
-  // Check shared library dependency
-  const libExists = fs.existsSync(SHARED_LIB_PATH);
-  console.log(`\nDependency (shared-claude-rules):`);
+  // Check shared library
+  const libExists = SHARED_LIB.every(f =>
+    fs.existsSync(path.join(HOOKS_DIR, 'lib', f))
+  );
+  console.log(`\nShared library (claude-hooks-core):`);
   console.log(`  session_state.py: ${libExists ? '  Installed' : '  Not installed'}`);
   if (!libExists) {
-    console.log('  -> Run: npx shared-claude-rules install');
+    console.log('  -> Will be installed automatically from claude-hooks-core');
   }
 
   // State file
